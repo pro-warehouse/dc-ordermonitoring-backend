@@ -4,7 +4,8 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const fs = require('fs');
 
 const app = express();
-const port = 3000;
+// ใช้ process.env.PORT เพื่อให้รองรับระบบอัตโนมัติของ Render ได้ดีขึ้น
+const port = process.env.PORT || 3000;
 
 app.use(cors()); 
 app.use(express.json({ limit: '100mb', type: ['application/json', 'text/plain'] })); 
@@ -15,7 +16,15 @@ const bigquery = new BigQuery({
     keyFilename: './key.json'      
 });
 
+// =====================================================================
+// 🟠 ส่วนที่ 1: สำหรับ "เว็บเก่า" (BigQuery) ต้องเป็น app.post เท่านั้น
+// =====================================================================
 app.post('/api/run', async (req, res) => {
+    // 🛡️ ป้องกันเซิร์ฟเวอร์พังเวลาไม่มีข้อมูลส่งมา หรือคนอื่นเรียกผิดช่องทาง
+    if (!req.body || !req.body.fn || !req.body.args) {
+        return res.status(400).json({ success: false, message: "Invalid request: Missing fn or args" });
+    }
+
     const { fn, args } = req.body;
     console.log(`\n[API Received] 👉 กำลังรันฟังก์ชัน: ${fn}`);
 
@@ -26,7 +35,6 @@ app.post('/api/run', async (req, res) => {
         else if (fn === 'saveDetailToBigQuery') result = await saveDetailToBigQuery(args[0]);
         else if (fn === 'getDailyDetailsFromDB') result = await getDailyDetailsFromDB(args[0], args[1]);
         else if (fn === 'apiGetDashboardSummary') result = await apiGetDashboardSummary(args[0], args[1]); 
-        // 🟢 เพิ่มบรรทัดนี้ลงไป: รับคำสั่งวิเคราะห์ Mismatch Pack Size
         else if (fn === 'apiGetMismatchReport') result = await apiGetMismatchReport(args[0], args[1]); 
         else result = { success: false, message: `ยังไม่ได้เปิดใช้งานฟังก์ชัน ${fn}` };
         
@@ -35,6 +43,43 @@ app.post('/api/run', async (req, res) => {
         console.error(`❌ [Error in ${fn}]`, error);
         res.status(500).json({ success: false, message: error.toString() });
     }
+});
+
+// =====================================================================
+// 🟢 ส่วนที่ 2: สำหรับ "Management Dashboard" (Real-time SSE) ต้องเป็น app.get เท่านั้น
+// =====================================================================
+app.get('/api/run', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const sendDashboardData = () => {
+        // ข้อมูลจำลองสำหรับทดสอบ (อนาคตค่อยดึงจาก BigQuery มาเสียบตรงนี้)
+        const sampleData = [
+            {
+                date: new Date().toISOString().split('T')[0],
+                bu: "DP02",
+                total_orders: 1500,
+                completed_orders: 1420
+            },
+            {
+                date: new Date().toISOString().split('T')[0],
+                bu: "DM02",
+                total_orders: 800,
+                completed_orders: 750
+            }
+        ];
+        res.write(`data: ${JSON.stringify(sampleData)}\n\n`);
+    };
+
+    // ส่งข้อมูลกลับไปทันที 1 ครั้ง และส่งซ้ำทุกๆ 5 วินาที
+    sendDashboardData();
+    const interval = setInterval(sendDashboardData, 5000);
+
+    // ปิดท่อเมื่อหน้าต่าง Dashboard ถูกปิด
+    req.on('close', () => {
+        clearInterval(interval);
+    });
 });
 
 // =====================================================================
@@ -152,7 +197,6 @@ async function getDailyDetailsFromDB(targetDate, stage) {
     
     const [rows] = await bigquery.query({ query: sql });
 
-    // 🟢 แกะ Date Object ของ BigQuery ให้กลายเป็น String ธรรมดา ป้องกันบักหน้าเว็บพัง
     const cleanRows = rows.map(r => {
         if (r.PickDate && typeof r.PickDate === 'object') r.PickDate = r.PickDate.value;
         if (r.OrderDate && typeof r.OrderDate === 'object') r.OrderDate = r.OrderDate.value;
@@ -209,7 +253,7 @@ async function saveDetailToBigQuery(reportData) {
 }
 
 // =====================================================================
-// 📦 5. ฟังก์ชันดึงสรุป Dashboard จาก BigQuery โดยตรง (Real-time Aggregation)
+// 📦 5. ฟังก์ชันดึงสรุป Dashboard จาก BigQuery โดยตรง
 // =====================================================================
 async function apiGetDashboardSummary(startDate, endDate) {
     const datasetId = 'logistics_db';
@@ -272,7 +316,7 @@ async function apiGetDashboardSummary(startDate, endDate) {
     } catch (error) { throw error; }
 }
 // =====================================================================
-// 📦 6. ฟังก์ชันดึงรายงานเบิกไม่ตรงแพ็คไซต์ (Pack Size Mismatch)
+// 📦 6. ฟังก์ชันดึงรายงานเบิกไม่ตรงแพ็คไซต์
 // =====================================================================
 async function apiGetMismatchReport(startDate, endDate) {
     const datasetId = 'logistics_db';
@@ -307,46 +351,6 @@ async function apiGetMismatchReport(startDate, endDate) {
     }
 }
 
-// =====================================================================
-// 🟢 เพิ่มใหม่: สำหรับ Management Dashboard (SSE Real-time)
-// ใช้ app.get เพื่อไม่ให้ไปชนกับ app.post ของเว็บเก่า
-// =====================================================================
-app.get('/api/run', (req, res) => {
-    // 1. ตั้งค่า Header ให้เป็นแบบส่งข้อมูลสตรีมมิ่ง (Real-time)
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    // 2. ฟังก์ชันดึงข้อมูล (ปัจจุบันใส่เป็นตัวเลขจำลองไว้ก่อน อนาคตสามารถดึงจาก BigQuery มาใส่ได้)
-    const sendDashboardData = () => {
-        const sampleData = [
-            {
-                date: new Date().toISOString().split('T')[0],
-                bu: "DP02",
-                total_orders: 1500,
-                completed_orders: 1420
-            },
-            {
-                date: new Date().toISOString().split('T')[0],
-                bu: "DM02",
-                total_orders: 800,
-                completed_orders: 750
-            }
-        ];
-        
-        // ส่งข้อมูลกลับไปให้หน้า Management Dashboard
-        res.write(`data: ${JSON.stringify(sampleData)}\n\n`);
-    };
-
-    // 3. สั่งให้ส่งข้อมูลทันที 1 ครั้ง และส่งซ้ำทุกๆ 5 วินาที
-    sendDashboardData();
-    const interval = setInterval(sendDashboardData, 5000);
-
-    // 4. คืนทรัพยากรเมื่อมีคนปิดหน้าเว็บ Dashboard
-    req.on('close', () => {
-        clearInterval(interval);
-    });
-});
 app.listen(port, () => {
     console.log(`\n=================================================`);
     console.log(`🚀 Backend Server เปิดพร้อมทำงานแล้ว!`);
