@@ -307,6 +307,46 @@ async function apiGetMismatchReport(startDate, endDate) {
     }
 }
 
+// =====================================================================
+// 🟢 เพิ่มใหม่: สำหรับ Management Dashboard (SSE Real-time)
+// ใช้ app.get เพื่อไม่ให้ไปชนกับ app.post ของเว็บเก่า
+// =====================================================================
+app.get('/api/run', (req, res) => {
+    // 1. ตั้งค่า Header ให้เป็นแบบส่งข้อมูลสตรีมมิ่ง (Real-time)
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // 2. ฟังก์ชันดึงข้อมูล (ปัจจุบันใส่เป็นตัวเลขจำลองไว้ก่อน อนาคตสามารถดึงจาก BigQuery มาใส่ได้)
+    const sendDashboardData = () => {
+        const sampleData = [
+            {
+                date: new Date().toISOString().split('T')[0],
+                bu: "DP02",
+                total_orders: 1500,
+                completed_orders: 1420
+            },
+            {
+                date: new Date().toISOString().split('T')[0],
+                bu: "DM02",
+                total_orders: 800,
+                completed_orders: 750
+            }
+        ];
+        
+        // ส่งข้อมูลกลับไปให้หน้า Management Dashboard
+        res.write(`data: ${JSON.stringify(sampleData)}\n\n`);
+    };
+
+    // 3. สั่งให้ส่งข้อมูลทันที 1 ครั้ง และส่งซ้ำทุกๆ 5 วินาที
+    sendDashboardData();
+    const interval = setInterval(sendDashboardData, 5000);
+
+    // 4. คืนทรัพยากรเมื่อมีคนปิดหน้าเว็บ Dashboard
+    req.on('close', () => {
+        clearInterval(interval);
+    });
+});
 app.listen(port, () => {
     console.log(`\n=================================================`);
     console.log(`🚀 Backend Server เปิดพร้อมทำงานแล้ว!`);
