@@ -36,6 +36,7 @@ app.post('/api/run', async (req, res) => {
         else if (fn === 'getDailyDetailsFromDB') result = await getDailyDetailsFromDB(args[0], args[1]);
         else if (fn === 'apiGetDashboardSummary') result = await apiGetDashboardSummary(args[0], args[1]); 
         else if (fn === 'apiGetMismatchReport') result = await apiGetMismatchReport(args[0], args[1]); 
+        else if (fn === 'apiGetWaveMonitoring') result = await apiGetWaveMonitoring(args[0], args[1]); // 🟢 เพิ่มบรรทัดนี้
         else result = { success: false, message: `ยังไม่ได้เปิดใช้งานฟังก์ชัน ${fn}` };
         
         res.json(result);
