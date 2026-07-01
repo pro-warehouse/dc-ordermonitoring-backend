@@ -351,6 +351,46 @@ async function apiGetMismatchReport(startDate, endDate) {
         throw err;
     }
 }
+// =====================================================================
+// 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, Ship, On-time)
+// =====================================================================
+async function apiGetWaveMonitoring(startDate, endDate) {
+    const datasetId = 'logistics_db';
+    let dateFilter = "";
+    
+    // ตั้งค่า Filter วันที่ให้สอดคล้องกับระบบเดิม
+    if (startDate && endDate) {
+        dateFilter = ` AND DATE(Created_At) BETWEEN '${startDate}' AND '${endDate}'`;
+    } else {
+        dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)`;
+    }
+
+    // SQL สำหรับดึงและคำนวณ % ต่างๆ
+    const sql = `
+      SELECT 
+          DATE(Created_At) AS work_date,
+          SUM(Total_Qty) AS total_req_qty,
+          COUNT(1) AS total_orders,
+          SUM(CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN Total_Qty ELSE 0 END) AS picked_qty,
+          SUM(CASE WHEN Status_Load = 'SHIPPED' THEN Total_Qty ELSE 0 END) AS shipped_qty,
+          COUNT(CASE WHEN Time_Load > '14:00:00' THEN 1 ELSE NULL END) AS late_orders
+      FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
+      WHERE 1=1 ${dateFilter}
+      GROUP BY DATE(Created_At)
+      ORDER BY work_date DESC
+    `;
+    
+    console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring...");
+    try {
+        const [rows] = await bigquery.query({ query: sql });
+        return { success: true, data: rows };
+    } catch (err) {
+        console.error("❌ SQL Error (Wave Monitoring):", err);
+        throw err;
+    }
+}
+
+// 🟢👆 จบส่วนที่ต้องวาง 👆🟢
 
 app.listen(port, () => {
     console.log(`\n=================================================`);
