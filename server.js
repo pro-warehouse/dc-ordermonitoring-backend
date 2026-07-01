@@ -368,15 +368,26 @@ async function apiGetWaveMonitoring(startDate, endDate) {
     // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
   SELECT 
-      DATE(Created_At) AS work_date,
-      COUNT(DISTINCT Order_Number) AS total_orders,
-      COUNT(DISTINCT CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN Order_Number END) AS picked_orders,
-      COUNT(DISTINCT CASE WHEN Status_Load = 'SHIPPED' THEN Order_Number END) AS shipped_orders,
-      COUNT(DISTINCT CASE WHEN Time_Load > '14:00:00' THEN Order_Number END) AS late_orders
-  FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
-  WHERE 1=1 ${dateFilter}
-  GROUP BY DATE(Created_At)
-  ORDER BY work_date DESC
+    DATE(Created_At) AS work_date,
+    COUNT(DISTINCT Order_Number) AS total_orders,
+    COUNT(DISTINCT CASE WHEN Status_Load = 'done' THEN Order_Number END) AS picked_orders,
+    COUNT(DISTINCT CASE WHEN Status_Load = 'done' THEN Order_Number END) AS shipped_orders,
+    -- ออเดอร์ที่ยังไม่ done และเลยเวลาแผนไปแล้ว
+    COUNT(DISTINCT CASE 
+        WHEN Status_Load != 'done' 
+             AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
+        THEN Order_Number 
+    END) AS late_orders,
+    -- ดีเลย์สูงสุด (นาที) ของออเดอร์ที่ยังไม่ done และเลยแผน
+    MAX(CASE 
+        WHEN Status_Load != 'done' 
+             AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
+        THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(DATETIME(Planned_Load_Date, Planned_Load_Time), 'Asia/Bangkok'), MINUTE)
+    END) AS max_delay_mins
+FROM `pro-analytics-db.${datasetId}.wave_monitoring`
+WHERE 1=1 ${dateFilter}
+GROUP BY DATE(Created_At)
+ORDER BY work_date DESC
 `;
     
     console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring...");
