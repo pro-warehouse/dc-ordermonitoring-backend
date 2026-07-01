@@ -368,15 +368,15 @@ async function apiGetWaveMonitoring(startDate, endDate) {
     // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
       SELECT 
-          DATE(Created_At) AS work_date,
-          COUNT(1) AS total_orders,
-          COUNT(CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN 1 ELSE NULL END) AS picked_orders,
-          COUNT(CASE WHEN Status_Load = 'SHIPPED' THEN 1 ELSE NULL END) AS shipped_orders,
-          COUNT(CASE WHEN Time_Load > '14:00:00' THEN 1 ELSE NULL END) AS late_orders
-      FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
-      WHERE 1=1 ${dateFilter}
-      GROUP BY DATE(Created_At)
-      ORDER BY work_date DESC
+    DATE(Created_At) AS work_date,
+    COUNT(DISTINCT OrderNo) AS total_orders,
+    COUNT(DISTINCT CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN OrderNo END) AS picked_orders,
+    COUNT(DISTINCT CASE WHEN Status_Load = 'SHIPPED' THEN OrderNo END) AS shipped_orders,
+    COUNT(DISTINCT CASE WHEN Time_Load > '14:00:00' THEN OrderNo END) AS late_orders
+FROM `pro-analytics-db.${datasetId}.wave_monitoring`
+WHERE 1=1 ${dateFilter}
+GROUP BY DATE(Created_At)
+ORDER BY work_date DESC
     `;
     
     console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring...");
