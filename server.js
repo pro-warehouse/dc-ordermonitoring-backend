@@ -373,7 +373,7 @@ async function apiGetWaveMonitoring(startDate, endDate) {
     COUNT(DISTINCT CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN OrderNo END) AS picked_orders,
     COUNT(DISTINCT CASE WHEN Status_Load = 'SHIPPED' THEN OrderNo END) AS shipped_orders,
     COUNT(DISTINCT CASE WHEN Time_Load > '14:00:00' THEN OrderNo END) AS late_orders
-FROM `pro-analytics-db.${datasetId}.wave_monitoring`
+FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
 WHERE 1=1 ${dateFilter}
 GROUP BY DATE(Created_At)
 ORDER BY work_date DESC
