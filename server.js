@@ -365,14 +365,13 @@ async function apiGetWaveMonitoring(startDate, endDate) {
         dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)`;
     }
 
-    // SQL สำหรับดึงและคำนวณ % ต่างๆ
+    // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
       SELECT 
           DATE(Created_At) AS work_date,
-          SUM(Total_Qty) AS total_req_qty,
           COUNT(1) AS total_orders,
-          SUM(CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN Total_Qty ELSE 0 END) AS picked_qty,
-          SUM(CASE WHEN Status_Load = 'SHIPPED' THEN Total_Qty ELSE 0 END) AS shipped_qty,
+          COUNT(CASE WHEN Status_Load IN ('PICKED', 'LOADED', 'SHIPPED') THEN 1 ELSE NULL END) AS picked_orders,
+          COUNT(CASE WHEN Status_Load = 'SHIPPED' THEN 1 ELSE NULL END) AS shipped_orders,
           COUNT(CASE WHEN Time_Load > '14:00:00' THEN 1 ELSE NULL END) AS late_orders
       FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
       WHERE 1=1 ${dateFilter}
