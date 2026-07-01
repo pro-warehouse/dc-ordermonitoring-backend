@@ -384,7 +384,7 @@ async function apiGetWaveMonitoring(startDate, endDate) {
              AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
         THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(DATETIME(Planned_Load_Date, Planned_Load_Time), 'Asia/Bangkok'), MINUTE)
     END) AS max_delay_mins
-FROM `pro-analytics-db.${datasetId}.wave_monitoring`
+FROM `\pro-analytics-db.${datasetId}.wave_monitoring\`
 WHERE 1=1 ${dateFilter}
 GROUP BY DATE(Created_At)
 ORDER BY work_date DESC
