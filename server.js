@@ -147,7 +147,7 @@ async function apiGetMissedPickReport(startDate, endDate) {
             MAX(CASE 
                 WHEN LOWER(TRIM(Status_Load)) != 'done' 
                      AND CURRENT_DATETIME('Asia/Bangkok') > target_time
-                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(target_time, 'Asia/Bangkok'), MINUTE)
+                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_time, 'Asia/Bangkok'), MINUTE)
             END) AS max_delay_mins
         FROM ParsedTimes
         GROUP BY DATE(Created_At)
