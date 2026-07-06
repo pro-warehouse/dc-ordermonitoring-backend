@@ -11,9 +11,10 @@ app.use(cors());
 app.use(express.json({ limit: '100mb', type: ['application/json', 'text/plain'] })); 
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
+// ลบ keyFilename ออก แล้วใช้ credentials แทน
 const bigquery = new BigQuery({
-    projectId: 'pro-analytics-db', 
-    keyFilename: './key.json'      
+    projectId: 'pro-analytics-db',
+    credentials: JSON.parse(process.env.GCP_CREDENTIALS)
 });
 
 // =====================================================================
@@ -384,7 +385,7 @@ async function apiGetWaveMonitoring(startDate, endDate) {
              AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
         THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(DATETIME(Planned_Load_Date, Planned_Load_Time), 'Asia/Bangkok'), MINUTE)
     END) AS max_delay_mins
-FROM `\pro-analytics-db.${datasetId}.wave_monitoring\`
+FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
 WHERE 1=1 ${dateFilter}
 GROUP BY DATE(Created_At)
 ORDER BY work_date DESC
