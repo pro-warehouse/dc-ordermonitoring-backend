@@ -10,6 +10,10 @@ const port = process.env.PORT || 3000;
 app.use(cors()); 
 app.use(express.json({ limit: '100mb', type: ['application/json', 'text/plain'] })); 
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+// 🟢 เพิ่ม Endpoint พิเศษสำหรับให้ Cron Job มาปลุกเซิร์ฟเวอร์
+app.get('/ping', (req, res) => {
+    res.status(200).send('Server is awake! 🚀');
+});
 
 let gcpCredentials;
 try {
