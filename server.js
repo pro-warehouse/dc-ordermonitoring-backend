@@ -363,43 +363,52 @@ async function apiGetMismatchReport(startDate, endDate) {
 // =====================================================================
 // 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, Ship, On-time)
 // =====================================================================
+// =====================================================================
+// 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, Ship, On-time)
+// =====================================================================
 async function apiGetWaveMonitoring(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
     
-    // ตั้งค่า Filter วันที่ให้สอดคล้องกับระบบเดิม
     if (startDate && endDate) {
         dateFilter = ` AND DATE(Created_At) BETWEEN '${startDate}' AND '${endDate}'`;
     } else {
         dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)`;
     }
 
-    // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
-  SELECT 
-    DATE(Created_At) AS work_date,
-    COUNT(DISTINCT Order_Number) AS total_orders,
-    COUNT(DISTINCT CASE WHEN Status_Load = 'done' THEN Order_Number END) AS picked_orders,
-    COUNT(DISTINCT CASE WHEN Status_Load = 'done' THEN Order_Number END) AS shipped_orders,
-    -- ออเดอร์ที่ยังไม่ done และเลยเวลาแผนไปแล้ว
-    COUNT(DISTINCT CASE 
-        WHEN Status_Load != 'done' 
-             AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
-        THEN Order_Number 
-    END) AS late_orders,
-    -- ดีเลย์สูงสุด (นาที) ของออเดอร์ที่ยังไม่ done และเลยแผน
-    MAX(CASE 
-        WHEN Status_Load != 'done' 
-             AND DATETIME(Planned_Load_Date, Planned_Load_Time) < CURRENT_DATETIME('Asia/Bangkok')
-        THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(DATETIME(Planned_Load_Date, Planned_Load_Time), 'Asia/Bangkok'), MINUTE)
-    END) AS max_delay_mins
-FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
-WHERE 1=1 ${dateFilter}
-GROUP BY DATE(Created_At)
-ORDER BY work_date DESC
-`;
+        WITH LatestOrders AS (
+            SELECT * FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
+            WHERE 1=1 ${dateFilter}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY Order_Number ORDER BY Created_At DESC) = 1
+        ),
+        ParsedTimes AS (
+            SELECT 
+                Created_At,
+                Order_Number,
+                Status_Pick,
+                Status_Load,
+                -- 🚀 วิธีที่ปลอดภัยที่สุด: ต่อ String ให้มี :00 (วินาที) เสมอ ป้องกัน BigQuery Error 500
+                SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME) AS target_time
+            FROM LatestOrders
+        )
+        SELECT 
+            DATE(Created_At) AS work_date,
+            COUNT(DISTINCT Order_Number) AS total_orders,
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
+            COUNT(DISTINCT CASE 
+                WHEN LOWER(TRIM(Status_Load)) != 'done' 
+                     AND target_time IS NOT NULL 
+                     AND CURRENT_DATETIME('Asia/Bangkok') > target_time
+                THEN Order_Number 
+            END) AS late_orders
+        FROM ParsedTimes
+        GROUP BY DATE(Created_At)
+        ORDER BY work_date DESC
+    `;
     
-    console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring...");
+    console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring (Fixed Date Format)...");
     try {
         const [rows] = await bigquery.query({ query: sql });
         return { success: true, data: rows };
