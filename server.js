@@ -11,10 +11,19 @@ app.use(cors());
 app.use(express.json({ limit: '100mb', type: ['application/json', 'text/plain'] })); 
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// ลบ keyFilename ออก แล้วใช้ credentials แทน
+let gcpCredentials;
+try {
+    // พยายามอ่านค่าจาก Render Environment
+    gcpCredentials = JSON.parse(process.env.GCP_CREDENTIALS);
+} catch (err) {
+    console.error("❌ ไม่พบตัวแปร GCP_CREDENTIALS หรือ JSON Format ผิดพลาด!");
+    // ใส่ Fallback ไว้ป้องกันแอปแครช (แต่อาจจะคิวรีข้อมูลไม่ได้จนกว่าจะใส่ Key)
+    gcpCredentials = {}; 
+}
+
 const bigquery = new BigQuery({
-    projectId: 'pro-analytics-db',
-    credentials: JSON.parse(process.env.GCP_CREDENTIALS)
+    projectId: 'pro-analytics-db', 
+    credentials: gcpCredentials
 });
 
 // =====================================================================
