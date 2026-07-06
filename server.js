@@ -386,7 +386,6 @@ async function apiGetWaveMonitoring(startDate, endDate) {
                 Status_Pick,
                 Status_Load,
                 SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME) AS target_load_time,
-                -- กำหนดเวลาเป้าหมาย Pick (เช่น เสร็จก่อน Load 2 ชม.)
                 DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 2 HOUR) AS target_pick_time
             FROM LatestOrders
         )
@@ -396,18 +395,14 @@ async function apiGetWaveMonitoring(startDate, endDate) {
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
 
-            -- นับออเดอร์ที่ช้า
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_pick_time THEN Order_Number END) AS late_pick_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time THEN Order_Number END) AS late_load_orders,
 
-            -- คำนวณเวลาที่ช้าที่สุด (Delay)
             MAX(CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_pick_time THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(target_pick_time, 'Asia/Bangkok'), MINUTE) ELSE 0 END) AS max_pick_delay_mins,
             MAX(CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(target_load_time, 'Asia/Bangkok'), MINUTE) ELSE 0 END) AS max_load_delay_mins,
 
-            -- คำนวณเวลาที่ทำล่วงหน้า (Early)
             MIN(CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') <= target_pick_time THEN TIMESTAMP_DIFF(TIMESTAMP(target_pick_time, 'Asia/Bangkok'), CURRENT_TIMESTAMP('Asia/Bangkok'), MINUTE) ELSE NULL END) AS min_pick_early_mins,
             MIN(CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') <= target_load_time THEN TIMESTAMP_DIFF(TIMESTAMP(target_load_time, 'Asia/Bangkok'), CURRENT_TIMESTAMP('Asia/Bangkok'), MINUTE) ELSE NULL END) AS min_load_early_mins
-
         FROM ParsedTimes
         GROUP BY DATE(Created_At)
         ORDER BY work_date DESC
