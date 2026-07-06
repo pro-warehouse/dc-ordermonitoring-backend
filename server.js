@@ -395,7 +395,7 @@ async function apiGetWaveMonitoring(startDate, endDate) {
                 Status_Pick,
                 Status_Load,
                 SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME) AS target_load_time,
-                DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 2 HOUR) AS target_pick_time
+                DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 90 MINUTE) AS target_pick_time
             FROM LatestOrders
         )
         SELECT 
