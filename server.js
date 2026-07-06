@@ -374,7 +374,7 @@ async function apiGetMismatchReport(startDate, endDate) {
     }
 }
 // =====================================================================
-// 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, Ship, On-time)
+// 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, QC, Ship, On-time)
 // =====================================================================
 async function apiGetWaveMonitoring(startDate, endDate) {
     const datasetId = 'logistics_db';
@@ -386,6 +386,7 @@ async function apiGetWaveMonitoring(startDate, endDate) {
         dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)`;
     }
 
+    // 🟢 เพิ่ม Status_Check และ Time_Check พร้อมคำนวณ SLA -30 นาที
     const sql = `
         WITH LatestOrders AS (
             SELECT * FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
@@ -397,31 +398,36 @@ async function apiGetWaveMonitoring(startDate, endDate) {
                 Created_At,
                 Order_Number,
                 Status_Pick,
+                Status_Check, -- ดึงสถานะ QC
+                Time_Check,   -- ดึงเวลา QC
                 Status_Load,
                 SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME) AS target_load_time,
-                DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 90 MINUTE) AS target_pick_time
+                DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 90 MINUTE) AS target_pick_time,
+                -- 🚨 คำนวณ SLA ของ QC (ก่อนเวลาโหลด 30 นาที)
+                DATETIME_SUB(SAFE_CAST(CONCAT(CAST(Planned_Pick_Date AS STRING), ' ', REPLACE(TRIM(Planned_Load_Time), '.', ':'), ':00') AS DATETIME), INTERVAL 30 MINUTE) AS target_qc_time
             FROM LatestOrders
         )
         SELECT 
             DATE(Created_At) AS work_date,
             COUNT(DISTINCT Order_Number) AS total_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
+            -- 🚨 นับจำนวนที่ผ่าน QC
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Check)) = 'done' THEN Order_Number END) AS qc_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
 
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_pick_time THEN Order_Number END) AS late_pick_orders,
+            -- 🚨 นับจำนวนบิลที่เลยเวลา QC ไปแล้ว (Late QC)
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Check)) != 'done' AND target_qc_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_qc_time THEN Order_Number END) AS late_qc_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time THEN Order_Number END) AS late_load_orders,
 
             MAX(CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_pick_time THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_pick_time, 'Asia/Bangkok'), MINUTE) ELSE 0 END) AS max_pick_delay_mins,
-            MAX(CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_load_time, 'Asia/Bangkok'), MINUTE) ELSE 0 END) AS max_load_delay_mins,
-
-            MIN(CASE WHEN LOWER(TRIM(Status_Pick)) != 'done' AND target_pick_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') <= target_pick_time THEN TIMESTAMP_DIFF(TIMESTAMP(target_pick_time, 'Asia/Bangkok'), CURRENT_TIMESTAMP(), MINUTE) ELSE NULL END) AS min_pick_early_mins,
-            MIN(CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') <= target_load_time THEN TIMESTAMP_DIFF(TIMESTAMP(target_load_time, 'Asia/Bangkok'), CURRENT_TIMESTAMP(), MINUTE) ELSE NULL END) AS min_load_early_mins
+            MAX(CASE WHEN LOWER(TRIM(Status_Load)) != 'done' AND target_load_time IS NOT NULL AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_load_time, 'Asia/Bangkok'), MINUTE) ELSE 0 END) AS max_load_delay_mins
         FROM ParsedTimes
         GROUP BY DATE(Created_At)
         ORDER BY work_date DESC
     `;
     
-    console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring (แยก Pick/Load)...");
+    console.log("[Query] กำลังดึงข้อมูลจาก wave_monitoring (แยก Pick/QC/Load)...");
     try {
         const [rows] = await bigquery.query({ query: sql });
         return { success: true, data: rows };
@@ -430,7 +436,6 @@ async function apiGetWaveMonitoring(startDate, endDate) {
         throw err;
     }
 }
-
 // 🟢👆 จบส่วนที่ต้องวาง 👆🟢
 
 app.listen(port, () => {
