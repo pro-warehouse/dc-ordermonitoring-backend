@@ -105,45 +105,44 @@ async function apiGetMissedPickReport(startDate, endDate) {
     else if (endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) <= '${endDate}'`;
     else dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
 
+    // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
-      WITH Est AS (
+        WITH LatestOrders AS (
+            SELECT * FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
+            WHERE 1=1 ${dateFilter}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY Order_Number ORDER BY Created_At DESC) = 1
+        ),
+        ParsedTimes AS (
+            SELECT 
+                Created_At,
+                Order_Number,
+                Status_Pick,
+                Status_Load,
+                -- แปลงรูปแบบเวลาที่มีจุด (.) ให้เป็น Colon (:) ป้องกัน BigQuery Error 500
+                COALESCE(
+                    SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
+                    DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
+                ) AS target_time
+            FROM LatestOrders
+        )
         SELECT 
-          LEFT(CAST(PickDate AS STRING), 10) as PickDate, 
-          UPPER(TRIM(CAST(Owner AS STRING))) as Owner, 
-          UPPER(TRIM(CAST(Item AS STRING))) as Item, 
-          MAX(Description) as Description, 
-          MAX(Zone) as Zone, 
-          MAX(PickType) as PickType, 
-          SUM(CAST(AllocatedQty AS FLOAT64)) as est_qty
-        FROM \`pro-analytics-db.${datasetId}.fulfillment_details_v2\`
-        WHERE 1=1 ${dateFilter}
-        GROUP BY 1, 2, 3
-      ),
-      Act AS (
-        SELECT 
-          LEFT(CAST(PickDate AS STRING), 10) as PickDate, 
-          UPPER(TRIM(CAST(Owner AS STRING))) as Owner, 
-          UPPER(TRIM(CAST(Item AS STRING))) as Item, 
-          SUM(CAST(ShippedQty AS FLOAT64)) as ship_qty
-        FROM \`pro-analytics-db.${datasetId}.actual_fulfillment_v2\`
-        WHERE 1=1 ${dateFilter}
-        GROUP BY 1, 2, 3
-      ),
-      ValidDates AS (
-        SELECT PickDate FROM Act GROUP BY PickDate HAVING SUM(ship_qty) > 0
-      )
-      SELECT 
-        e.PickDate as srcDate, e.Owner as own, e.Item as itm, e.Description as \`desc\`, 
-        e.Zone as z, e.PickType as pt,
-        e.est_qty as est, IFNULL(a.ship_qty, 0) as ship,
-        GREATEST(0, e.est_qty - IFNULL(a.ship_qty, 0)) as missed_pick
-      FROM Est e
-      INNER JOIN ValidDates vd ON e.PickDate = vd.PickDate
-      LEFT JOIN Act a ON e.PickDate = a.PickDate 
-                     AND e.Item = a.Item 
-                     AND (e.Owner = a.Owner OR IFNULL(a.Owner, '') IN ('', '-'))
-      WHERE (e.est_qty - IFNULL(a.ship_qty, 0)) > 0
-      ORDER BY srcDate DESC, missed_pick DESC
+            DATE(Created_At) AS work_date,
+            COUNT(DISTINCT Order_Number) AS total_orders,
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
+            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
+            COUNT(DISTINCT CASE 
+                WHEN LOWER(TRIM(Status_Load)) != 'done' 
+                     AND CURRENT_DATETIME('Asia/Bangkok') > target_time
+                THEN Order_Number 
+            END) AS late_orders,
+            MAX(CASE 
+                WHEN LOWER(TRIM(Status_Load)) != 'done' 
+                     AND CURRENT_DATETIME('Asia/Bangkok') > target_time
+                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP('Asia/Bangkok'), TIMESTAMP(target_time, 'Asia/Bangkok'), MINUTE)
+            END) AS max_delay_mins
+        FROM ParsedTimes
+        GROUP BY DATE(Created_At)
+        ORDER BY work_date DESC
     `;
     
     const [rows] = await bigquery.query({ query: sql });
