@@ -118,11 +118,20 @@ async function apiGetMissedPickReport(startDate, endDate) {
                 Order_Number,
                 Status_Pick,
                 Status_Load,
-                -- แปลงรูปแบบเวลาที่มีจุด (.) ให้เป็น Colon (:) ป้องกัน BigQuery Error 500
+                -- ใช้เทคนิค COALESCE เหมือนใน apiGetMissedPickReport เพื่อป้องกัน Error
                 COALESCE(
                     SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
                     DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
-                ) AS target_time
+                ) AS target_load_time,
+                
+                -- คำนวณเวลา Pick ถอยไป 2 ชั่วโมง
+                DATETIME_SUB(
+                    COALESCE(
+                        SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
+                        DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
+                    ), 
+                    INTERVAL 2 HOUR
+                ) AS target_pick_time
             FROM LatestOrders
         )
         SELECT 
