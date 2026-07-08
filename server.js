@@ -98,19 +98,22 @@ app.get('/api/run', (req, res) => {
 });
 
 // =====================================================================
-// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick (แก้ไขให้ดึงระดับ Item ที่มี Shortage)
+// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick (อัปเดตแก้บั๊ก Filter 'All' และ SAFE_CAST)
 // =====================================================================
 async function apiGetMissedPickReport(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
-    
-    // ใช้ PickDate เพื่อกรองวันที่จากตาราง actual_fulfillment_v2
-    if (startDate && endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) BETWEEN '${startDate}' AND '${endDate}'`;
-    else if (startDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) >= '${startDate}'`;
-    else if (endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) <= '${endDate}'`;
-    else dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
 
-    // SQL สำหรับดึงรายการที่ของขาด (Shortage > 0)
+    // 🚨 ดักจับกรณีที่ Date Picker ส่งค่าคำว่า 'All' มา (ถ้าไม่ดัก SQL จะคืนค่า 0 บรรทัด)
+    if (!startDate || startDate === 'All' || startDate === 'all') {
+        dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
+    } else if (startDate && endDate && endDate !== 'All') {
+        dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) BETWEEN '${startDate}' AND '${endDate}'`;
+    } else if (startDate) {
+        dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) >= '${startDate}'`;
+    }
+
+    // 🛡️ ใช้ SAFE_CAST ป้องกัน Error กรณีมีค่าว่างหรือตัวหนังสือหลุดเข้าไปในฟิลด์ตัวเลข
     const sql = `
         SELECT 
             LEFT(CAST(PickDate AS STRING), 10) AS PickDate,
@@ -119,19 +122,26 @@ async function apiGetMissedPickReport(startDate, endDate) {
             TRIM(CAST(Owner AS STRING)) AS Owner,
             MAX(Zone) AS Zone,
             MAX(PickType) AS PickType,
-            SUM(CAST(ReqQty AS FLOAT64)) AS ReqQty,
-            SUM(CAST(ShippedQty AS FLOAT64)) AS ShippedQty,
-            SUM(CAST(Shortage AS FLOAT64)) AS Shortage
+            SUM(SAFE_CAST(ReqQty AS FLOAT64)) AS ReqQty,
+            SUM(SAFE_CAST(ShippedQty AS FLOAT64)) AS ShippedQty,
+            SUM(SAFE_CAST(Shortage AS FLOAT64)) AS Shortage
         FROM \`pro-analytics-db.${datasetId}.actual_fulfillment_v2\`
-        WHERE CAST(Shortage AS FLOAT64) > 0 
+        WHERE SAFE_CAST(Shortage AS FLOAT64) > 0 
         ${dateFilter}
         GROUP BY 1, 2, 4
         ORDER BY PickDate DESC, Shortage DESC
     `;
     
-    console.log("[Query] กำลังดึงข้อมูล Missed Pick (Shortage Item)...");
+    console.log(`\n[Query] Missed Pick เงื่อนไขเวลา: startDate=${startDate}, endDate=${endDate}`);
     try {
         const [rows] = await bigquery.query({ query: sql });
+        console.log(`✅ โหลดข้อมูล Missed Pick สำเร็จ เจอทั้งหมด ${rows.length} บรรทัด`);
+        
+        // เช็คว่าถ้าเจอข้อมูล แต่หน้าเว็บไม่ขึ้น อาจจะเป็นที่ Frontend รับชื่อ Key ไม่ตรง
+        if (rows.length > 0) {
+            console.log("👉 ตัวอย่างข้อมูลที่ส่งให้เว็บ:", rows[0]);
+        }
+        
         return { success: true, data: rows };
     } catch (err) {
         console.error("❌ SQL Error (Missed Pick):", err);
