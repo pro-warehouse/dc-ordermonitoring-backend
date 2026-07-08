@@ -98,71 +98,45 @@ app.get('/api/run', (req, res) => {
 });
 
 // =====================================================================
-// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick
+// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick (แก้ไขให้ดึงระดับ Item ที่มี Shortage)
 // =====================================================================
 async function apiGetMissedPickReport(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
     
-    if (startDate && endDate) dateFilter = ` AND DATE(Created_At) BETWEEN '${startDate}' AND '${endDate}'`;
-    else if (startDate) dateFilter = ` AND DATE(Created_At) >= '${startDate}'`;
-    else if (endDate) dateFilter = ` AND DATE(Created_At) <= '${endDate}'`;
-    else dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
+    // ใช้ PickDate เพื่อกรองวันที่จากตาราง actual_fulfillment_v2
+    if (startDate && endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) BETWEEN '${startDate}' AND '${endDate}'`;
+    else if (startDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) >= '${startDate}'`;
+    else if (endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) <= '${endDate}'`;
+    else dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
 
-    // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
+    // SQL สำหรับดึงรายการที่ของขาด (Shortage > 0)
     const sql = `
-        WITH LatestOrders AS (
-            SELECT * FROM \`pro-analytics-db.${datasetId}.wave_monitoring\`
-            WHERE 1=1 ${dateFilter}
-            QUALIFY ROW_NUMBER() OVER(PARTITION BY Order_Number ORDER BY Created_At DESC) = 1
-        ),
-        ParsedTimes AS (
-            SELECT 
-                Created_At,
-                Order_Number,
-                Status_Pick,
-                Status_Load,
-                COALESCE(
-                    SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
-                    DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
-                ) AS target_load_time,
-                
-                DATETIME_SUB(
-                    COALESCE(
-                        SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
-                        DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
-                    ), 
-                    INTERVAL 2 HOUR
-                ) AS target_pick_time
-            FROM LatestOrders
-        )
         SELECT 
-            DATE(Created_At) AS work_date,
-            COUNT(DISTINCT Order_Number) AS total_orders,
-            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
-            COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
-            
-            -- 👇 จุดที่แก้: เปลี่ยน target_time เป็น target_load_time
-            COUNT(DISTINCT CASE 
-                WHEN LOWER(TRIM(Status_Load)) != 'done' 
-                     AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time
-                THEN Order_Number 
-            END) AS late_orders,
-            
-            -- 👇 จุดที่แก้: เปลี่ยน target_time เป็น target_load_time 2 ที่
-            MAX(CASE 
-                WHEN LOWER(TRIM(Status_Load)) != 'done' 
-                     AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time
-                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_load_time, 'Asia/Bangkok'), MINUTE)
-            END) AS max_delay_mins
-            
-        FROM ParsedTimes
-        GROUP BY DATE(Created_At)
-        ORDER BY work_date DESC
+            LEFT(CAST(PickDate AS STRING), 10) AS PickDate,
+            TRIM(CAST(Item AS STRING)) AS Item,
+            MAX(Description) AS Description,
+            TRIM(CAST(Owner AS STRING)) AS Owner,
+            MAX(Zone) AS Zone,
+            MAX(PickType) AS PickType,
+            SUM(CAST(ReqQty AS FLOAT64)) AS ReqQty,
+            SUM(CAST(ShippedQty AS FLOAT64)) AS ShippedQty,
+            SUM(CAST(Shortage AS FLOAT64)) AS Shortage
+        FROM \`pro-analytics-db.${datasetId}.actual_fulfillment_v2\`
+        WHERE CAST(Shortage AS FLOAT64) > 0 
+        ${dateFilter}
+        GROUP BY 1, 2, 4
+        ORDER BY PickDate DESC, Shortage DESC
     `;
     
-    const [rows] = await bigquery.query({ query: sql });
-    return { success: true, data: rows };
+    console.log("[Query] กำลังดึงข้อมูล Missed Pick (Shortage Item)...");
+    try {
+        const [rows] = await bigquery.query({ query: sql });
+        return { success: true, data: rows };
+    } catch (err) {
+        console.error("❌ SQL Error (Missed Pick):", err);
+        throw err;
+    }
 }
 
 // =====================================================================
@@ -341,6 +315,7 @@ async function apiGetDashboardSummary(startDate, endDate) {
         return { success: true, data: formattedRows };
     } catch (error) { throw error; }
 }
+
 // =====================================================================
 // 📦 6. ฟังก์ชันดึงรายงานเบิกไม่ตรงแพ็คไซต์
 // =====================================================================
@@ -376,6 +351,7 @@ async function apiGetMismatchReport(startDate, endDate) {
         throw err;
     }
 }
+
 // =====================================================================
 // 📦 7. ฟังก์ชันดึงข้อมูล Wave Monitoring (ดึงข้อมูล Pick, QC, Ship, On-time)
 // =====================================================================
