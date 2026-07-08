@@ -122,13 +122,11 @@ async function apiGetMissedPickReport(startDate, endDate) {
                 Order_Number,
                 Status_Pick,
                 Status_Load,
-                -- ใช้เทคนิค COALESCE เหมือนใน apiGetMissedPickReport เพื่อป้องกัน Error
                 COALESCE(
                     SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
                     DATETIME(Planned_Pick_Date, SAFE_CAST(REPLACE(TRIM(Planned_Load_Time), '.', ':') AS TIME))
                 ) AS target_load_time,
                 
-                -- คำนวณเวลา Pick ถอยไป 2 ชั่วโมง
                 DATETIME_SUB(
                     COALESCE(
                         SAFE_CAST(TRIM(Planned_Load_Time) AS DATETIME), 
@@ -143,16 +141,21 @@ async function apiGetMissedPickReport(startDate, endDate) {
             COUNT(DISTINCT Order_Number) AS total_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Pick)) = 'done' THEN Order_Number END) AS picked_orders,
             COUNT(DISTINCT CASE WHEN LOWER(TRIM(Status_Load)) = 'done' THEN Order_Number END) AS shipped_orders,
+            
+            -- 👇 จุดที่แก้: เปลี่ยน target_time เป็น target_load_time
             COUNT(DISTINCT CASE 
                 WHEN LOWER(TRIM(Status_Load)) != 'done' 
-                     AND CURRENT_DATETIME('Asia/Bangkok') > target_time
+                     AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time
                 THEN Order_Number 
             END) AS late_orders,
+            
+            -- 👇 จุดที่แก้: เปลี่ยน target_time เป็น target_load_time 2 ที่
             MAX(CASE 
                 WHEN LOWER(TRIM(Status_Load)) != 'done' 
-                     AND CURRENT_DATETIME('Asia/Bangkok') > target_time
-                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_time, 'Asia/Bangkok'), MINUTE)
+                     AND CURRENT_DATETIME('Asia/Bangkok') > target_load_time
+                THEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP(target_load_time, 'Asia/Bangkok'), MINUTE)
             END) AS max_delay_mins
+            
         FROM ParsedTimes
         GROUP BY DATE(Created_At)
         ORDER BY work_date DESC
