@@ -104,10 +104,10 @@ async function apiGetMissedPickReport(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
     
-    if (startDate && endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) BETWEEN '${startDate}' AND '${endDate}'`;
-    else if (startDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) >= '${startDate}'`;
-    else if (endDate) dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) <= '${endDate}'`;
-    else dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
+    if (startDate && endDate) dateFilter = ` AND DATE(Created_At) BETWEEN '${startDate}' AND '${endDate}'`;
+    else if (startDate) dateFilter = ` AND DATE(Created_At) >= '${startDate}'`;
+    else if (endDate) dateFilter = ` AND DATE(Created_At) <= '${endDate}'`;
+    else dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
 
     // SQL สำหรับดึงและคำนวณ % ต่างๆ (นับเป็นบิล)
     const sql = `
