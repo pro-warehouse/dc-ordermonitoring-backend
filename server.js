@@ -98,13 +98,13 @@ app.get('/api/run', (req, res) => {
 });
 
 // =====================================================================
-// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick (อัปเดตแก้บั๊ก Filter 'All' และ SAFE_CAST)
+// 📦 1. ฟังก์ชันดึงรายงาน Missed Pick (แก้บั๊กแสดงผลหน้าเว็บ + คำนวณ Shortage สด)
 // =====================================================================
 async function apiGetMissedPickReport(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
 
-    // 🚨 ดักจับกรณีที่ Date Picker ส่งค่าคำว่า 'All' มา (ถ้าไม่ดัก SQL จะคืนค่า 0 บรรทัด)
+    // 🚨 ดักจับกรณีที่ Date Picker ส่งค่าคำว่า 'All'
     if (!startDate || startDate === 'All' || startDate === 'all') {
         dateFilter = ` AND PARSE_DATE('%Y-%m-%d', LEFT(CAST(PickDate AS STRING), 10)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
     } else if (startDate && endDate && endDate !== 'All') {
@@ -113,7 +113,7 @@ async function apiGetMissedPickReport(startDate, endDate) {
         dateFilter = ` AND LEFT(CAST(PickDate AS STRING), 10) >= '${startDate}'`;
     }
 
-    // 🛡️ ใช้ SAFE_CAST ป้องกัน Error กรณีมีค่าว่างหรือตัวหนังสือหลุดเข้าไปในฟิลด์ตัวเลข
+    // 🛡️ คำนวณ Shortage ใหม่สดๆ (ReqQty - ShippedQty) ป้องกันข้อมูลในคอลัมน์ Shortage ผิดเพี้ยน
     const sql = `
         SELECT 
             LEFT(CAST(PickDate AS STRING), 10) AS PickDate,
@@ -123,26 +123,40 @@ async function apiGetMissedPickReport(startDate, endDate) {
             MAX(Zone) AS Zone,
             MAX(PickType) AS PickType,
             SUM(SAFE_CAST(ReqQty AS FLOAT64)) AS ReqQty,
-            SUM(SAFE_CAST(ShippedQty AS FLOAT64)) AS ShippedQty,
-            SUM(SAFE_CAST(Shortage AS FLOAT64)) AS Shortage
+            SUM(SAFE_CAST(ShippedQty AS FLOAT64)) AS ShippedQty
         FROM \`pro-analytics-db.${datasetId}.actual_fulfillment_v2\`
-        WHERE SAFE_CAST(Shortage AS FLOAT64) > 0 
-        ${dateFilter}
+        WHERE 1=1 ${dateFilter}
         GROUP BY 1, 2, 4
-        ORDER BY PickDate DESC, Shortage DESC
+        HAVING (SUM(SAFE_CAST(ReqQty AS FLOAT64)) - SUM(SAFE_CAST(ShippedQty AS FLOAT64))) > 0
+        ORDER BY PickDate DESC
     `;
     
-    console.log(`\n[Query] Missed Pick เงื่อนไขเวลา: startDate=${startDate}, endDate=${endDate}`);
+    console.log(`\n[Query] Missed Pick เงื่อนไขเวลา: startDate=${startDate}`);
     try {
         const [rows] = await bigquery.query({ query: sql });
-        console.log(`✅ โหลดข้อมูล Missed Pick สำเร็จ เจอทั้งหมด ${rows.length} บรรทัด`);
         
-        // เช็คว่าถ้าเจอข้อมูล แต่หน้าเว็บไม่ขึ้น อาจจะเป็นที่ Frontend รับชื่อ Key ไม่ตรง
-        if (rows.length > 0) {
-            console.log("👉 ตัวอย่างข้อมูลที่ส่งให้เว็บ:", rows[0]);
-        }
-        
-        return { success: true, data: rows };
+        // 🛠️ แมปปิ้งตัวแปรเผื่อไว้ทุกรูปแบบที่หน้าเว็บ Frontend อาจจะเรียกใช้ (ชื่อเต็ม, ชื่อเล็ก, ชื่อย่อ)
+        const formattedData = rows.map(r => {
+            const req = r.ReqQty || 0;
+            const ship = r.ShippedQty || 0;
+            const short = req - ship;
+
+            return {
+                ...r,                // คืนค่ารูปแบบเดิม (PickDate, Item, ฯลฯ)
+                date: r.PickDate, pD: r.PickDate,
+                item: r.Item, itm: r.Item,
+                description: r.Description, desc: r.Description,
+                owner: r.Owner, own: r.Owner,
+                zone: r.Zone, z: r.Zone,
+                pickType: r.PickType, pt: r.PickType, pick: r.PickType,
+                reqQty: req, req: req, estimated: req,
+                shippedQty: ship, ship: ship,
+                shortage: short, short: short, missedPick: short
+            };
+        });
+
+        console.log(`✅ ประมวลผลเสร็จสิ้น เจอ Missed Pick ทั้งหมด ${formattedData.length} รายการ`);
+        return { success: true, data: formattedData };
     } catch (err) {
         console.error("❌ SQL Error (Missed Pick):", err);
         throw err;
