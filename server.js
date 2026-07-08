@@ -383,11 +383,11 @@ async function apiGetWaveMonitoring(startDate, endDate) {
     const datasetId = 'logistics_db';
     let dateFilter = "";
     
-    if (startDate && endDate) {
-        dateFilter = ` AND DATE(Created_At) BETWEEN '${startDate}' AND '${endDate}'`;
-    } else {
-        dateFilter = ` AND DATE(Created_At) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)`;
-    }
+    if (!startDate || startDate === 'All' || startDate === 'all') {
+    dateFilter = ` AND ... >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)`;
+} else if (startDate && endDate) {
+    dateFilter = ` AND ... BETWEEN '${startDate}' AND '${endDate}'`;
+}
 
     // 🟢 เพิ่ม Status_Check และ Time_Check พร้อมคำนวณ SLA -30 นาที
     const sql = `
