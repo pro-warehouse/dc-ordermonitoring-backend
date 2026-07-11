@@ -95,20 +95,36 @@ app.post('/api/run', async (req, res) => {
         else if (fn === 'apiGetPick') result = await apiGetPick();
         else if (fn === 'apiGetUnit') result = await apiGetUnit();
         
-        // --- เริ่ม: โค้ดจัดการ Capacity ที่หายไป ---
         else if (fn === 'apiGetCapacity') {
             const dateFilter = buildDateFilter(args[0], args[1], `target_date`, 30, false);
             const sql = `SELECT target_date, owner, capacity FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE 1=1 ${dateFilter}`;
             const [rows] = await bigquery.query({ query: sql });
             result = { success: true, data: rows };
         }
-        else if (fn === 'apiSaveCapacity') {
-            const { target_date, owner, capacity } = args[0];
-            await bigquery.query({ query: `DELETE FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE target_date = '${target_date}' AND owner = '${owner}'` });
-            await bigquery.query({ query: `INSERT INTO \`pro-analytics-db.logistics_db.daily_capacity\` (target_date, owner, capacity) VALUES ('${target_date}', '${owner}', ${capacity})` });
-            result = { success: true };
+        // --- เริ่ม: เปลี่ยนเป็นเซฟแบบรวดเดียวจบ (Bulk Save) ---
+        else if (fn === 'apiSaveCapacityBulk') {
+            const dataList = args[0]; // รับข้อมูลมาเป็น Array
+            if (!dataList || dataList.length === 0) {
+                result = { success: true };
+            } else {
+                const target_date = dataList[0].target_date;
+                const owners = dataList.map(d => `'${d.owner}'`).join(',');
+
+                // 1. สั่งลบข้อมูลเก่าของทุก BU ในวันนั้น "พร้อมกัน" ในคำสั่งเดียว
+                await bigquery.query({
+                    query: `DELETE FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE target_date = '${target_date}' AND owner IN (${owners})`
+                });
+
+                // 2. สั่งเพิ่มข้อมูลใหม่ทุก BU "พร้อมกัน" ในคำสั่งเดียว
+                const valuesStr = dataList.map(d => `('${d.target_date}', '${d.owner}', ${d.capacity})`).join(',');
+                await bigquery.query({
+                    query: `INSERT INTO \`pro-analytics-db.logistics_db.daily_capacity\` (target_date, owner, capacity) VALUES ${valuesStr}`
+                });
+
+                result = { success: true };
+            }
         }
-        // --- จบ: โค้ดจัดการ Capacity ที่หายไป ---
+        // --- จบ: Bulk Save ---
 
         else result = { success: false, message: `ยังไม่ได้เปิดใช้งานฟังก์ชัน ${fn}` };
 
