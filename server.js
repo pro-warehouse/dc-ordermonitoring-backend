@@ -95,7 +95,7 @@ app.post('/api/run', async (req, res) => {
         else if (fn === 'apiGetPick') result = await apiGetPick();
         else if (fn === 'apiGetUnit') result = await apiGetUnit();
         
-        // --- ส่วนที่เพิ่มใหม่สำหรับจัดการ Capacity ---
+        // --- เริ่ม: โค้ดจัดการ Capacity ที่หายไป ---
         else if (fn === 'apiGetCapacity') {
             const dateFilter = buildDateFilter(args[0], args[1], `target_date`, 30, false);
             const sql = `SELECT target_date, owner, capacity FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE 1=1 ${dateFilter}`;
@@ -104,16 +104,11 @@ app.post('/api/run', async (req, res) => {
         }
         else if (fn === 'apiSaveCapacity') {
             const { target_date, owner, capacity } = args[0];
-            // ลบข้อมูลของวันและ BU นั้นออกก่อน เพื่ออัปเดตค่าใหม่ (Upsert)
-            await bigquery.query({
-                query: `DELETE FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE target_date = '${target_date}' AND owner = '${owner}'`
-            });
-            await bigquery.query({
-                query: `INSERT INTO \`pro-analytics-db.logistics_db.daily_capacity\` (target_date, owner, capacity) VALUES ('${target_date}', '${owner}', ${capacity})`
-            });
+            await bigquery.query({ query: `DELETE FROM \`pro-analytics-db.logistics_db.daily_capacity\` WHERE target_date = '${target_date}' AND owner = '${owner}'` });
+            await bigquery.query({ query: `INSERT INTO \`pro-analytics-db.logistics_db.daily_capacity\` (target_date, owner, capacity) VALUES ('${target_date}', '${owner}', ${capacity})` });
             result = { success: true };
         }
-        // ------------------------------------------
+        // --- จบ: โค้ดจัดการ Capacity ที่หายไป ---
 
         else result = { success: false, message: `ยังไม่ได้เปิดใช้งานฟังก์ชัน ${fn}` };
 
